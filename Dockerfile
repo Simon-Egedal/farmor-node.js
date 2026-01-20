@@ -2,6 +2,9 @@ FROM node:18-alpine
 
 WORKDIR /app
 
+# Install wget for health checks
+RUN apk add --no-cache wget
+
 COPY package.json package-lock.json ./
 RUN npm ci --only=production
 
@@ -12,8 +15,8 @@ EXPOSE 8080
 ENV NODE_ENV=production
 ENV PORT=8080
 
-# Health check
-HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:8080/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
+# Health check with longer timeout and startup grace period
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=2 \
+  CMD wget --quiet --tries=1 --spider http://localhost:8080/health || exit 1
 
 CMD ["node", "src/index.js"]
