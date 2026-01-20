@@ -87,6 +87,11 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`[INFO] Environment: ${process.env.NODE_ENV || 'production'}`);
   console.log('[INFO] Application ready to receive requests');
+  
+  // Start health check only after server is listening
+  setInterval(() => {
+    console.log(`[HEALTH] App is alive - ${new Date().toISOString()}`);
+  }, 30000);
 });
 
 // Track connections
@@ -127,10 +132,5 @@ const shutdown = (signal) => {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
-
-// Keep process alive
-setInterval(() => {
-  console.log(`[HEALTH] App is alive - ${new Date().toISOString()}`);
-}, 30000);
 
 module.exports = app;
