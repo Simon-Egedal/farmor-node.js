@@ -101,14 +101,18 @@ server.on('connection', (conn) => {
 });
 
 // Graceful shutdown
-const shutdown = (signal) => {
+const shutdown = async (signal) => {
   console.log(`\n[INFO] ${signal} received, shutting down gracefully...`);
-  server.close(() => {
+  server.close(async () => {
     console.log('[INFO] Server closed');
-    mongoose.connection.close(false, () => {
+    try {
+      await mongoose.connection.close();
       console.log('[INFO] MongoDB connection closed');
       process.exit(0);
-    });
+    } catch (err) {
+      console.error('[ERROR] Error closing MongoDB:', err.message);
+      process.exit(1);
+    }
   });
   
   // Force shutdown after 30 seconds
