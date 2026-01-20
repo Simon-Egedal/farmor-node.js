@@ -15,6 +15,18 @@ const cashRoutes = require('./routes/cash');
 // Initialize app
 const app = express();
 
+// Catch uncaught exceptions
+process.on('uncaughtException', (err) => {
+  console.error('✗ Uncaught Exception:', err);
+  process.exit(1);
+});
+
+// Catch unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('✗ Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
 // Security middleware
 app.use(helmet());
 app.use(morgan('combined'));
@@ -30,12 +42,18 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // MongoDB Connection
+console.log('[INFO] Attempting MongoDB connection...');
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
-.then(() => console.log('✓ MongoDB connected'))
-.catch(err => console.error('✗ MongoDB connection error:', err));
+.then(() => {
+  console.log('✓ MongoDB connected');
+})
+.catch(err => {
+  console.error('✗ MongoDB connection error:', err.message);
+  // Don't exit - app can still serve requests
+});
 
 // Health check
 app.get('/health', (req, res) => {
@@ -67,27 +85,45 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 8080;
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`[INFO] Environment: ${process.env.NODE_ENV || 'production'}`);
+  console.log('[INFO] Application ready to receive requests');
+});
+
+// Track connections
+let activeConnections = 0;
+server.on('connection', (conn) => {
+  activeConnections++;
+  console.log(`[INFO] Connection established (${activeConnections} active)`);
+  conn.on('close', () => {
+    activeConnections--;
+    console.log(`[INFO] Connection closed (${activeConnections} active)`);
+  });
 });
 
 // Graceful shutdown
 const shutdown = (signal) => {
-  console.log(`\n${signal} received, shutting down gracefully...`);
+  console.log(`\n[INFO] ${signal} received, shutting down gracefully...`);
   server.close(() => {
-    console.log('✓ Server closed');
+    console.log('[INFO] Server closed');
     mongoose.connection.close(false, () => {
-      console.log('✓ MongoDB connection closed');
+      console.log('[INFO] MongoDB connection closed');
       process.exit(0);
     });
   });
   
-  // Force shutdown after 10 seconds
+  // Force shutdown after 30 seconds
   setTimeout(() => {
-    console.error('✗ Forced shutdown');
+    console.error('[ERROR] Forced shutdown after timeout');
     process.exit(1);
-  }, 10000);
+  }, 30000);
 };
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Keep process alive
+setInterval(() => {
+  console.log(`[HEALTH] App is alive - ${new Date().toISOString()}`);
+}, 30000);
 
 module.exports = app;
