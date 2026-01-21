@@ -36,49 +36,60 @@ const getExchangeRate = async () => {
   }
 };
 
+// Helper function to determine stock currency from ticker
+const getCurrencyFromTicker = (ticker) => {
+  if (ticker.includes('.CO')) return 'DKK';   // Copenhagen
+  if (ticker.includes('.ST')) return 'SEK';   // Stockholm
+  if (ticker.includes('.OL')) return 'NOK';   // Oslo
+  if (ticker.includes('.HE')) return 'EUR';   // Helsinki
+  if (ticker.includes('.SW')) return 'CHF';   // Swiss
+  return 'USD'; // Default to USD
+};
+
 // Helper function to enrich portfolio with real-time prices in DKK
 const enrichPortfolioWithPrices = async (stocks) => {
   const tickers = stocks.map(s => s.ticker);
   
   try {
-    // Fetch exchange rate and prices in parallel to avoid timeout
-    const [exchangeRate, priceResponse] = await Promise.all([
-      getExchangeRate(),
-      apiClient.post(`${STOCK_API_URL}/api/batch-price`, { tickers })
-    ]);
-    
+    // Fetch prices
+    const priceResponse = await apiClient.post(`${STOCK_API_URL}/api/batch-price`, { tickers });
     const priceData = priceResponse.data;
     
-    return stocks.map(stock => {
-      const currentPriceUSD = priceData[stock.ticker]?.price || 0;
-      const currentPrice = currentPriceUSD * exchangeRate; // Convert to DKK
-      const buyPriceDKK = stock.buyPrice * exchangeRate; // Buy price in DKK
+    return await Promise.all(stocks.map(async (stock) => {
+      const priceInStockCurrency = priceData[stock.ticker]?.price || 0;
+      
+      // Determine the currency of the stock based on ticker
+      const stockCurrency = getCurrencyFromTicker(stock.ticker);
+      
+      // Convert to DKK if not already DKK
+      const currentPriceDKK = await convertToDKK(priceInStockCurrency, stockCurrency);
+      const buyPriceDKK = await convertToDKK(stock.buyPrice, stock.currency || stockCurrency);
+      
       const cost = buyPriceDKK * stock.shares;
-      const currentValue = currentPrice * stock.shares;
+      const currentValue = currentPriceDKK * stock.shares;
       const gain = currentValue - cost;
       const gainPercent = cost > 0 ? ((gain / cost) * 100).toFixed(2) : 0;
       
       return {
         ...stock.toObject(),
-        currentPrice: parseFloat(currentPrice.toFixed(2)),
+        currentPrice: parseFloat(currentPriceDKK.toFixed(2)),
         currentValue: parseFloat(currentValue.toFixed(2)),
         gain: parseFloat(gain.toFixed(2)),
         gainPercent: parseFloat(gainPercent),
         currency: 'DKK',
-        exchangeRate: parseFloat(exchangeRate.toFixed(2))
+        stockNativeCurrency: stockCurrency
       };
-    });
+    }));
   } catch (error) {
     console.warn('[WARN] Error fetching prices:', error.message);
     // Return stocks with buy price as current price if API fails
     return stocks.map(stock => ({
       ...stock.toObject(),
-      currentPrice: stock.buyPrice * 6.5,
-      currentValue: stock.buyPrice * 6.5 * stock.shares,
+      currentPrice: stock.buyPrice,
+      currentValue: stock.buyPrice * stock.shares,
       gain: 0,
       gainPercent: 0,
-      currency: 'DKK',
-      exchangeRate: 6.5
+      currency: 'DKK'
     }));
   }
 };
