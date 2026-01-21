@@ -85,18 +85,22 @@ const enrichPortfolioWithPrices = async (stocks) => {
       
       return {
         ...stock.toObject(),
-        // Show NATIVE prices in the table
+        // Prices in NATIVE currency
         currentPrice: parseFloat(priceInStockCurrency.toFixed(2)),
         buyPrice: parseFloat(stock.buyPrice.toFixed(2)),
-        currentValue: parseFloat((priceInStockCurrency * stock.shares).toFixed(2)),
-        cost: parseFloat((stock.buyPrice * stock.shares).toFixed(2)),
-        gain: parseFloat(((priceInStockCurrency - stock.buyPrice) * stock.shares).toFixed(2)),
-        gainPercent: stock.buyPrice > 0 ? parseFloat((((priceInStockCurrency - stock.buyPrice) / stock.buyPrice) * 100).toFixed(2)) : 0,
         
-        // Also include DKK values for backend use
+        // Value/Gain in DKK
+        currentValue: parseFloat(valueDKK.toFixed(2)),
+        cost: parseFloat(costDKK.toFixed(2)),
+        gain: parseFloat(gainDKK.toFixed(2)),
+        gainPercent: parseFloat(gainPercent),
+        
+        // Also include native values for reference
         priceNative: parseFloat(priceInStockCurrency.toFixed(2)),
         buyPriceNative: parseFloat(stock.buyPrice.toFixed(2)),
         nativeCurrency: stockCurrency,
+        
+        // DKK values
         priceDKK: currentPriceDKK,
         buyPriceDKK: buyPriceDKK,
         valueDKK: parseFloat(valueDKK.toFixed(2)),
@@ -115,12 +119,17 @@ const enrichPortfolioWithPrices = async (stocks) => {
       
       return {
         ...stock.toObject(),
+        // Prices in NATIVE currency
         currentPrice: parseFloat(stock.buyPrice.toFixed(2)),
         buyPrice: parseFloat(stock.buyPrice.toFixed(2)),
-        currentValue: parseFloat((stock.buyPrice * stock.shares).toFixed(2)),
-        cost: parseFloat((stock.buyPrice * stock.shares).toFixed(2)),
+        
+        // Value/Gain in DKK
+        currentValue: parseFloat(valueDKK.toFixed(2)),
+        cost: parseFloat(valueDKK.toFixed(2)),
         gain: 0,
         gainPercent: 0,
+        
+        // Native reference
         priceNative: parseFloat(stock.buyPrice.toFixed(2)),
         buyPriceNative: parseFloat(stock.buyPrice.toFixed(2)),
         nativeCurrency: stockCurrency,
