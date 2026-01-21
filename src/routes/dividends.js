@@ -26,19 +26,6 @@ const convertToDKK = (amount, currency) => {
   return parseFloat((amount * rate).toFixed(2));
 };
 
-// Helper to calculate percentile
-const percentile = (arr, p) => {
-  if (arr.length === 0) return 0;
-  const sorted = [...arr].sort((a, b) => a - b);
-  const index = (p / 100) * (sorted.length - 1);
-  const lower = Math.floor(index);
-  const upper = Math.ceil(index);
-  const weight = index % 1;
-  
-  if (lower === upper) return sorted[lower];
-  return sorted[lower] * (1 - weight) + sorted[upper] * weight;
-};
-
 // Sophisticated dividend calculation with outlier detection (matches Streamlit logic)
 const calculateRegularDividend = async (ticker) => {
   try {
@@ -48,59 +35,11 @@ const calculateRegularDividend = async (ticker) => {
     
     if (!response.data) return 0.0;
     
-    const divData = response.data;
-    const info = divData.info || {};
+    // Python API returns: { ticker, annualDividend, currency, dividendYield }
+    const annualDividend = parseFloat(response.data.annualDividend) || 0;
     
-    // METHOD 1: Forward Dividend Rate (most reliable)
-    if (info.dividendRate && info.dividendRate > 0) {
-      return parseFloat(info.dividendRate);
-    }
-    
-    // METHOD 2: Trailing Dividend Yield
-    if (info.trailingAnnualDividendYield && info.currentPrice && info.currentPrice > 0) {
-      const trailingDividend = info.trailingAnnualDividendYield * info.currentPrice;
-      if (trailingDividend > 0) {
-        return parseFloat(trailingDividend);
-      }
-    }
-    
-    // METHOD 3: Calculate from history with outlier detection (IQR method)
-    const dividends = divData.dividends;
-    if (dividends && Array.isArray(dividends) && dividends.length >= 4) {
-      const oneYearAgo = new Date();
-      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-      
-      const lastYearDivs = dividends.filter(div => {
-        const divDate = new Date(div.date || div.exDate);
-        return divDate > oneYearAgo;
-      }).map(div => parseFloat(div.amount || div.value || 0));
-      
-      if (lastYearDivs.length >= 2) {
-        // IQR outlier detection
-        const q1 = percentile(lastYearDivs, 25);
-        const q3 = percentile(lastYearDivs, 75);
-        const iqr = q3 - q1;
-        
-        const lowerBound = q1 - 1.5 * iqr;
-        const upperBound = q3 + 1.5 * iqr;
-        
-        const regularDivs = lastYearDivs.filter(d => d >= lowerBound && d <= upperBound);
-        
-        if (regularDivs.length > 0) {
-          return parseFloat(regularDivs.reduce((a, b) => a + b, 0).toFixed(4));
-        }
-      }
-    }
-    
-    // METHOD 4: Last 4 quarters fallback
-    if (dividends && Array.isArray(dividends) && dividends.length >= 4) {
-      const last4 = dividends.slice(-4).map(d => parseFloat(d.amount || d.value || 0));
-      const medianVal = percentile(last4, 50);
-      const regularVals = last4.filter(d => d < medianVal * 2.5);
-      
-      if (regularVals.length >= 3) {
-        return parseFloat((regularVals.reduce((a, b) => a + b, 0) * (4 / regularVals.length)).toFixed(4));
-      }
+    if (annualDividend && annualDividend > 0) {
+      return annualDividend;
     }
     
     return 0.0;
@@ -134,14 +73,19 @@ router.get('/summary', authMiddleware, async (req, res) => {
     
     // Calculate expected dividends from holdings using sophisticated logic
     const portfolio = await Portfolio.find();
+    console.log(`[DIVIDENDS] Found ${portfolio.length} stocks in portfolio`);
+    
     const expectedDividendsList = [];
     let estimatedAnnualDividend = 0;
     let monthlyAverage = 0;
 
     for (const stock of portfolio) {
       try {
+        console.log(`[DIVIDENDS] Calculating dividend for ${stock.ticker} (${stock.shares} shares)`);
+        
         // Use sophisticated dividend calculation
         const annualDividendPerShare = await calculateRegularDividend(stock.ticker);
+        console.log(`[DIVIDENDS] ${stock.ticker}: ${annualDividendPerShare}/share`);
         
         if (annualDividendPerShare && annualDividendPerShare > 0) {
           const shares = parseFloat(stock.shares) || 0;
@@ -149,6 +93,7 @@ router.get('/summary', authMiddleware, async (req, res) => {
           const currency = stock.currency || 'USD';
           const dividendInDKK = convertToDKK(totalDividend, currency);
           
+          console.log(`[DIVIDENDS] ${stock.ticker}: ${totalDividend} ${currency} = ${dividendInDKK} DKK`);
           estimatedAnnualDividend += dividendInDKK;
           
           // Create or update expected dividend record
@@ -186,7 +131,7 @@ router.get('/summary', authMiddleware, async (req, res) => {
           expectedDividendsList.push(dividend);
         }
       } catch (error) {
-        console.warn(`Could not calculate dividend for ${stock.ticker}:`, error.message);
+        console.error(`[DIVIDENDS ERROR] Could not calculate dividend for ${stock.ticker}:`, error.message);
       }
     }
 
