@@ -27,6 +27,14 @@ process.on('unhandledRejection', (reason, promise) => {
   process.exit(1);
 });
 
+// Log all signals to identify what's stopping the container
+process.on('SIGHUP', () => console.log('[SIGNAL] SIGHUP received'));
+process.on('SIGQUIT', () => console.log('[SIGNAL] SIGQUIT received'));
+process.on('SIGABRT', () => console.log('[SIGNAL] SIGABRT received'));
+process.on('SIGALRM', () => console.log('[SIGNAL] SIGALRM received'));
+process.on('SIGUSR1', () => console.log('[SIGNAL] SIGUSR1 received'));
+process.on('SIGUSR2', () => console.log('[SIGNAL] SIGUSR2 received'));
+
 // Security middleware
 app.use(helmet());
 app.use(morgan('combined'));
@@ -85,7 +93,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 5000;
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`[INFO] Environment: ${process.env.NODE_ENV || 'production'}`);
@@ -108,9 +116,16 @@ server.on('connection', (conn) => {
   });
 });
 
-// Graceful shutdown
+// Graceful shutdown with delay to prevent accidental restarts
 const shutdown = (signal) => {
   console.log(`\n[INFO] ${signal} received, shutting down gracefully...`);
+  
+  // Set a flag to prevent re-entrance
+  if (process.shuttingDown) {
+    console.log('[INFO] Already shutting down, ignoring signal');
+    return;
+  }
+  process.shuttingDown = true;
   
   // Close server and connections
   server.close(() => {
@@ -137,7 +152,12 @@ const shutdown = (signal) => {
   }, 30000);
 };
 
+// Only shutdown on explicit signals
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Log when these signals arrive but don't exit
+process.on('SIGHUP', () => console.log('[SIGNAL] SIGHUP received - ignoring'));
+process.on('SIGPIPE', () => console.log('[SIGNAL] SIGPIPE received - ignoring'));
 
 module.exports = app;
