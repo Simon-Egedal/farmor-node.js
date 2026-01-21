@@ -96,28 +96,14 @@ router.get('/summary', authMiddleware, async (req, res) => {
           console.log(`[DIVIDENDS] ${stock.ticker}: ${totalDividend} ${currency} = ${dividendInDKK} DKK`);
           estimatedAnnualDividend += dividendInDKK;
           
-          // Get actual dividend dates from API response
-          let exDate = new Date(now);
-          exDate.setMonth(exDate.getMonth() + 3);
-          let payDate = new Date(exDate);
-          payDate.setMonth(payDate.getMonth() + 1);
+          // Use simple estimated dates - don't try to predict exact dates
+          // Most stocks pay dividends quarterly (every ~90 days)
+          const exDate = new Date(now);
+          exDate.setMonth(exDate.getMonth() + 2);  // ~2 months from now
+          exDate.setDate(15);  // Middle of month
           
-          // Try to get actual dates from API response
-          try {
-            const divResponse = await axios.get(`${STOCK_API_URL}/api/dividend/${stock.ticker}`, {
-              timeout: 5000
-            });
-            if (divResponse.data.nextExDate) {
-              exDate = new Date(divResponse.data.nextExDate);
-              console.log(`[DIVIDENDS] ${stock.ticker} next ex-date: ${exDate.toISOString()}`);
-            }
-            if (divResponse.data.nextPayDate) {
-              payDate = new Date(divResponse.data.nextPayDate);
-              console.log(`[DIVIDENDS] ${stock.ticker} next pay-date: ${payDate.toISOString()}`);
-            }
-          } catch (apiError) {
-            console.warn(`[DIVIDENDS] Could not fetch dates for ${stock.ticker}, using estimates`);
-          }
+          const payDate = new Date(exDate);
+          payDate.setMonth(payDate.getMonth() + 1);  // Payment ~1 month after ex-date
           
           // Create or update expected dividend record
           let dividend = await Dividend.findOne({
