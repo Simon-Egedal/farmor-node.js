@@ -55,11 +55,15 @@ const getCurrentPrice = async (ticker) => {
 // Helper function to enrich portfolio with real-time prices in DKK
 const enrichPortfolioWithPrices = async (stocks) => {
   const tickers = stocks.map(s => s.ticker);
+  console.log(`[PORTFOLIO] Fetching prices for: ${tickers.join(', ')}`);
+  console.log(`[PORTFOLIO] API URL: ${STOCK_API_URL}`);
   
   try {
     // Fetch prices
+    console.log(`[PORTFOLIO] Making request to: ${STOCK_API_URL}/api/batch-price`);
     const priceResponse = await apiClient.post(`${STOCK_API_URL}/api/batch-price`, { tickers });
     const priceData = priceResponse.data;
+    console.log(`[PORTFOLIO] Received price data:`, JSON.stringify(priceData).substring(0, 200));
     
     return stocks.map(stock => {
       const priceInStockCurrency = priceData[stock.ticker]?.price || 0;
@@ -98,7 +102,9 @@ const enrichPortfolioWithPrices = async (stocks) => {
       };
     });
   } catch (error) {
-    console.warn('[WARN] Error fetching prices:', error.message);
+    console.error('[ERROR] Failed to fetch prices from stock API:', error.message);
+    console.error('[ERROR] URL was:', `${STOCK_API_URL}/api/batch-price`);
+    console.error('[ERROR] Error details:', error.code || error.response?.status || 'unknown');
     // Return stocks with current values if API fails
     return stocks.map(stock => {
       const stockCurrency = getCurrencyFromTicker(stock.ticker);
