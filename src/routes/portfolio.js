@@ -96,33 +96,29 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
-// Get portfolio summary with real-time calculations in DKK
+// Get portfolio summary with real-time calculations
 router.get('/summary', authMiddleware, async (req, res) => {
   try {
     const portfolio = await Portfolio.find();
     const enriched = await enrichPortfolioWithPrices(portfolio);
     
-    // All calculations in DKK
-    const totalCostDKK = enriched.reduce((sum, stock) => {
-      return sum + stock.costDKK;
+    const totalCost = enriched.reduce((sum, stock) => {
+      return sum + (stock.buyPrice * stock.shares);
     }, 0);
     
-    const totalValueDKK = enriched.reduce((sum, stock) => {
-      return sum + stock.currentValueDKK;
+    const totalValue = enriched.reduce((sum, stock) => {
+      return sum + stock.currentValue;
     }, 0);
     
-    const totalGainDKK = totalValueDKK - totalCostDKK;
-    const gainPercent = totalCostDKK > 0 ? ((totalGainDKK / totalCostDKK) * 100).toFixed(2) : 0;
+    const totalGain = totalValue - totalCost;
+    const gainPercent = totalCost > 0 ? ((totalGain / totalCost) * 100).toFixed(2) : 0;
     
     res.json({
-      currency: 'DKK',
-      summary: {
-        totalCostDKK: parseFloat(totalCostDKK.toFixed(2)),
-        totalValueDKK: parseFloat(totalValueDKK.toFixed(2)),
-        totalGainDKK: parseFloat(totalGainDKK.toFixed(2)),
-        gainPercent: parseFloat(gainPercent),
-        holdingsCount: enriched.length
-      },
+      totalCost: parseFloat(totalCost.toFixed(2)),
+      totalValue: parseFloat(totalValue.toFixed(2)),
+      totalGain: parseFloat(totalGain.toFixed(2)),
+      gainPercent: parseFloat(gainPercent),
+      holdingsCount: enriched.length,
       stocks: enriched
     });
   } catch (error) {
