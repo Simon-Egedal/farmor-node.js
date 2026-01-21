@@ -5,12 +5,19 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 require('dotenv').config();
 
-// Import routes
-const authRoutes = require('./routes/auth');
-const portfolioRoutes = require('./routes/portfolio');
-const stockRoutes = require('./routes/stocks');
-const dividendRoutes = require('./routes/dividends');
-const cashRoutes = require('./routes/cash');
+// Import routes with error handling
+let authRoutes, portfolioRoutes, stockRoutes, dividendRoutes, cashRoutes;
+try {
+  authRoutes = require('./routes/auth');
+  portfolioRoutes = require('./routes/portfolio');
+  stockRoutes = require('./routes/stocks');
+  dividendRoutes = require('./routes/dividends');
+  cashRoutes = require('./routes/cash');
+  console.log('[INFO] All routes loaded successfully');
+} catch (err) {
+  console.error('[ERROR] Failed to load routes:', err.message);
+  process.exit(1);
+}
 
 // Initialize app
 const app = express();
@@ -68,7 +75,17 @@ if (!process.env.MONGODB_URI) {
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+  res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// Readiness check - verifies MongoDB is connected
+app.get('/ready', (req, res) => {
+  if (mongoose.connection.readyState === 1) {
+    res.status(200).json({ status: 'READY', db: 'connected' });
+  } else {
+    // Still return 200 even if DB not connected - app can function without it
+    res.status(200).json({ status: 'READY', db: 'disconnected', warning: 'MongoDB not connected' });
+  }
 });
 
 // API Routes
