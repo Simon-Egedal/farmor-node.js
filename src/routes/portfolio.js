@@ -4,28 +4,34 @@ const Portfolio = require('../models/Portfolio');
 const Transaction = require('../models/Transaction');
 const Cash = require('../models/Cash');
 const { authMiddleware } = require('../middleware/auth');
+const { convertToDKK } = require('../utils/currencyConverter');
 
 const router = express.Router();
 const STOCK_API_URL = process.env.STOCK_API_URL || 'http://localhost:5001';
 
+// Create axios instance with timeout
+const apiClient = axios.create({
+  timeout: 5000 // 5 second timeout to prevent hanging
+});
+
 // Helper function to fetch current price for a ticker
 const getCurrentPrice = async (ticker) => {
   try {
-    const response = await axios.get(`${STOCK_API_URL}/api/stock/${ticker}`);
+    const response = await apiClient.get(`${STOCK_API_URL}/api/stock/${ticker}`);
     return response.data.price || 0;
   } catch (error) {
-    console.error(`Error fetching price for ${ticker}:`, error.message);
+    console.warn(`[WARN] Error fetching price for ${ticker}:`, error.message);
     return 0;
   }
 };
 
-// Helper function to get USD/DKK exchange rate
+// Helper function to get exchange rate with timeout
 const getExchangeRate = async () => {
   try {
-    const response = await axios.get(`${STOCK_API_URL}/api/exchange-rate/USD/DKK`);
+    const response = await apiClient.get(`${STOCK_API_URL}/api/exchange-rate/USD/DKK`);
     return response.data.rate || 6.5; // Default rate if API fails
   } catch (error) {
-    console.error('Error fetching exchange rate:', error.message);
+    console.warn('[WARN] Error fetching exchange rate:', error.message);
     return 6.5; // Default USD/DKK rate
   }
 };
@@ -35,15 +41,13 @@ const enrichPortfolioWithPrices = async (stocks) => {
   const tickers = stocks.map(s => s.ticker);
   
   try {
-    // Fetch exchange rate
-    const exchangeRate = await getExchangeRate();
+    // Fetch exchange rate and prices in parallel to avoid timeout
+    const [exchangeRate, priceResponse] = await Promise.all([
+      getExchangeRate(),
+      apiClient.post(`${STOCK_API_URL}/api/batch-price`, { tickers })
+    ]);
     
-    // Fetch prices
-    const response = await axios.post(`${STOCK_API_URL}/api/batch-price`, {
-      tickers
-    });
-    
-    const priceData = response.data;
+    const priceData = priceResponse.data;
     
     return stocks.map(stock => {
       const currentPriceUSD = priceData[stock.ticker]?.price || 0;
@@ -65,7 +69,7 @@ const enrichPortfolioWithPrices = async (stocks) => {
       };
     });
   } catch (error) {
-    console.error('Error fetching prices:', error.message);
+    console.warn('[WARN] Error fetching prices:', error.message);
     // Return stocks with buy price as current price if API fails
     return stocks.map(stock => ({
       ...stock.toObject(),
@@ -73,7 +77,8 @@ const enrichPortfolioWithPrices = async (stocks) => {
       currentValue: stock.buyPrice * 6.5 * stock.shares,
       gain: 0,
       gainPercent: 0,
-      currency: 'DKK'
+      currency: 'DKK',
+      exchangeRate: 6.5
     }));
   }
 };
