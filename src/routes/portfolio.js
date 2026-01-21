@@ -117,15 +117,19 @@ const enrichPortfolioWithPrices = async (stocks) => {
       
       return {
         ...stock.toObject(),
+        currentPrice: buyPriceDKK,
+        buyPrice: buyPriceDKK,
+        currentValue: parseFloat(valueDKK.toFixed(2)),
+        cost: parseFloat(valueDKK.toFixed(2)),
+        gain: 0,
+        gainPercent: 0,
         priceNative: parseFloat(stock.buyPrice.toFixed(2)),
         buyPriceNative: parseFloat(stock.buyPrice.toFixed(2)),
         nativeCurrency: stockCurrency,
         priceDKK: buyPriceDKK,
         buyPriceDKK: buyPriceDKK,
-        costDKK: parseFloat(valueDKK.toFixed(2)),
         valueDKK: parseFloat(valueDKK.toFixed(2)),
-        gainDKK: 0,
-        gainPercent: 0
+        costDKK: parseFloat(valueDKK.toFixed(2))
       };
     });
   }
