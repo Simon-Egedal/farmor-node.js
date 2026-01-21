@@ -4,6 +4,7 @@ const Portfolio = require('../models/Portfolio');
 const Transaction = require('../models/Transaction');
 const Cash = require('../models/Cash');
 const { authMiddleware } = require('../middleware/auth');
+const { convertToDKK } = require('../utils/currencyConverter');
 
 const router = express.Router();
 const STOCK_API_URL = process.env.STOCK_API_URL || 'http://localhost:5001';
@@ -24,7 +25,7 @@ const getCurrentPrice = async (ticker) => {
   }
 };
 
-// Helper function to enrich portfolio with real-time prices
+// Helper function to enrich portfolio with real-time prices and convert to DKK
 const enrichPortfolioWithPrices = async (stocks) => {
   const tickers = stocks.map(s => s.ticker);
   
@@ -35,30 +36,51 @@ const enrichPortfolioWithPrices = async (stocks) => {
     
     const priceData = response.data;
     
-    return stocks.map(stock => {
+    return await Promise.all(stocks.map(async (stock) => {
       const currentPrice = priceData[stock.ticker]?.price || 0;
-      const cost = stock.buyPrice * stock.shares;
-      const currentValue = currentPrice * stock.shares;
+      
+      // Convert prices to DKK
+      const buyPriceDKK = await convertToDKK(stock.buyPrice, stock.currency);
+      const currentPriceDKK = await convertToDKK(currentPrice, stock.currency);
+      
+      const cost = buyPriceDKK * stock.shares;
+      const currentValue = currentPriceDKK * stock.shares;
       const gain = currentValue - cost;
       const gainPercent = cost > 0 ? ((gain / cost) * 100).toFixed(2) : 0;
       
       return {
         ...stock.toObject(),
-        currentPrice: parseFloat(currentPrice.toFixed(2)),
-        currentValue: parseFloat(currentValue.toFixed(2)),
-        gain: parseFloat(gain.toFixed(2)),
+        // Original prices
+        originalPrice: currentPrice,
+        originalBuyPrice: stock.buyPrice,
+        originalCurrency: stock.currency,
+        // DKK prices
+        currentPriceDKK: parseFloat(currentPriceDKK.toFixed(2)),
+        buyPriceDKK: parseFloat(buyPriceDKK.toFixed(2)),
+        costDKK: parseFloat(cost.toFixed(2)),
+        currentValueDKK: parseFloat(currentValue.toFixed(2)),
+        gainDKK: parseFloat(gain.toFixed(2)),
         gainPercent: parseFloat(gainPercent)
       };
-    });
+    }));
   } catch (error) {
     console.warn('[WARN] Error fetching prices:', error.message);
     // Return stocks with buy price as current price if API fails
-    return stocks.map(stock => ({
-      ...stock.toObject(),
-      currentPrice: stock.buyPrice,
-      currentValue: stock.buyPrice * stock.shares,
-      gain: 0,
-      gainPercent: 0
+    return await Promise.all(stocks.map(async (stock) => {
+      const buyPriceDKK = await convertToDKK(stock.buyPrice, stock.currency);
+      
+      return {
+        ...stock.toObject(),
+        originalPrice: stock.buyPrice,
+        originalBuyPrice: stock.buyPrice,
+        originalCurrency: stock.currency,
+        currentPriceDKK: buyPriceDKK,
+        buyPriceDKK,
+        costDKK: parseFloat((buyPriceDKK * stock.shares).toFixed(2)),
+        currentValueDKK: parseFloat((buyPriceDKK * stock.shares).toFixed(2)),
+        gainDKK: 0,
+        gainPercent: 0
+      };
     }));
   }
 };
@@ -74,29 +96,33 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
-// Get portfolio summary with real-time calculations
+// Get portfolio summary with real-time calculations in DKK
 router.get('/summary', authMiddleware, async (req, res) => {
   try {
     const portfolio = await Portfolio.find();
     const enriched = await enrichPortfolioWithPrices(portfolio);
     
-    const totalCost = enriched.reduce((sum, stock) => {
-      return sum + (stock.buyPrice * stock.shares);
+    // All calculations in DKK
+    const totalCostDKK = enriched.reduce((sum, stock) => {
+      return sum + stock.costDKK;
     }, 0);
     
-    const totalValue = enriched.reduce((sum, stock) => {
-      return sum + stock.currentValue;
+    const totalValueDKK = enriched.reduce((sum, stock) => {
+      return sum + stock.currentValueDKK;
     }, 0);
     
-    const totalGain = totalValue - totalCost;
-    const gainPercent = totalCost > 0 ? ((totalGain / totalCost) * 100).toFixed(2) : 0;
+    const totalGainDKK = totalValueDKK - totalCostDKK;
+    const gainPercent = totalCostDKK > 0 ? ((totalGainDKK / totalCostDKK) * 100).toFixed(2) : 0;
     
     res.json({
-      totalCost: parseFloat(totalCost.toFixed(2)),
-      totalValue: parseFloat(totalValue.toFixed(2)),
-      totalGain: parseFloat(totalGain.toFixed(2)),
-      gainPercent: parseFloat(gainPercent),
-      holdingsCount: enriched.length,
+      currency: 'DKK',
+      summary: {
+        totalCostDKK: parseFloat(totalCostDKK.toFixed(2)),
+        totalValueDKK: parseFloat(totalValueDKK.toFixed(2)),
+        totalGainDKK: parseFloat(totalGainDKK.toFixed(2)),
+        gainPercent: parseFloat(gainPercent),
+        holdingsCount: enriched.length
+      },
       stocks: enriched
     });
   } catch (error) {
