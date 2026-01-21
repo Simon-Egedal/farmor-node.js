@@ -85,20 +85,18 @@ const enrichPortfolioWithPrices = async (stocks) => {
       
       return {
         ...stock.toObject(),
-        // For frontend compatibility
-        currentPrice: currentPriceDKK,
-        buyPrice: buyPriceDKK,
-        currentValue: valueDKK,
-        cost: costDKK,
-        gain: gainDKK,
-        gainPercent: gainPercent,
+        // Show NATIVE prices in the table
+        currentPrice: parseFloat(priceInStockCurrency.toFixed(2)),
+        buyPrice: parseFloat(stock.buyPrice.toFixed(2)),
+        currentValue: parseFloat((priceInStockCurrency * stock.shares).toFixed(2)),
+        cost: parseFloat((stock.buyPrice * stock.shares).toFixed(2)),
+        gain: parseFloat(((priceInStockCurrency - stock.buyPrice) * stock.shares).toFixed(2)),
+        gainPercent: stock.buyPrice > 0 ? parseFloat((((priceInStockCurrency - stock.buyPrice) / stock.buyPrice) * 100).toFixed(2)) : 0,
         
-        // Native prices (in stock's original currency)
+        // Also include DKK values for backend use
         priceNative: parseFloat(priceInStockCurrency.toFixed(2)),
         buyPriceNative: parseFloat(stock.buyPrice.toFixed(2)),
         nativeCurrency: stockCurrency,
-        
-        // DKK prices (explicit)
         priceDKK: currentPriceDKK,
         buyPriceDKK: buyPriceDKK,
         valueDKK: parseFloat(valueDKK.toFixed(2)),
@@ -117,10 +115,10 @@ const enrichPortfolioWithPrices = async (stocks) => {
       
       return {
         ...stock.toObject(),
-        currentPrice: buyPriceDKK,
-        buyPrice: buyPriceDKK,
-        currentValue: parseFloat(valueDKK.toFixed(2)),
-        cost: parseFloat(valueDKK.toFixed(2)),
+        currentPrice: parseFloat(stock.buyPrice.toFixed(2)),
+        buyPrice: parseFloat(stock.buyPrice.toFixed(2)),
+        currentValue: parseFloat((stock.buyPrice * stock.shares).toFixed(2)),
+        cost: parseFloat((stock.buyPrice * stock.shares).toFixed(2)),
         gain: 0,
         gainPercent: 0,
         priceNative: parseFloat(stock.buyPrice.toFixed(2)),
@@ -201,7 +199,7 @@ router.post('/add', authMiddleware, async (req, res) => {
       ticker: ticker.toUpperCase(),
       shares: parseFloat(shares),
       buyPrice: parseFloat(buyPrice),
-      currency,
+      currency: currency || getCurrencyFromTicker(ticker.toUpperCase()),
       buyDate: buyDate || new Date(),
       notes
     });
@@ -214,7 +212,7 @@ router.post('/add', authMiddleware, async (req, res) => {
       type: 'BUY',
       shares: parseFloat(shares),
       price: parseFloat(buyPrice),
-      currency,
+      currency: currency || getCurrencyFromTicker(ticker.toUpperCase()),
       transactionDate: buyDate || new Date()
     });
 
@@ -223,17 +221,17 @@ router.post('/add', authMiddleware, async (req, res) => {
     // If user chose to deduct from cash, create a cash withdrawal in DKK
     if (deductFromCash) {
       try {
-        // Get exchange rate
-        const exchangeRate = await getExchangeRate();
+        // Determine stock currency
+        const stockCurrency = currency || getCurrencyFromTicker(ticker.toUpperCase());
         
         // Convert cost to DKK
-        const costUSD = parseFloat(shares) * parseFloat(buyPrice);
-        const costDKK = costUSD * exchangeRate;
+        const costNative = parseFloat(shares) * parseFloat(buyPrice);
+        const costDKK = convertToDKK(costNative, stockCurrency);
         
         const cashTransaction = new Cash({
           amount: costDKK,
           type: 'WITHDRAWAL',
-          description: `Stock purchase: ${ticker.toUpperCase()} - ${parseFloat(shares)} shares @ ${parseFloat(buyPrice)} USD (${costDKK.toFixed(2)} DKK)`
+          description: `Stock purchase: ${ticker.toUpperCase()} - ${parseFloat(shares)} shares @ ${parseFloat(buyPrice)} ${stockCurrency} (${costDKK.toFixed(2)} DKK)`
         });
         await cashTransaction.save();
       } catch (error) {
