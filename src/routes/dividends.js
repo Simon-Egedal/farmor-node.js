@@ -8,11 +8,6 @@ const { authMiddleware } = require('../middleware/auth');
 const router = express.Router();
 const STOCK_API_URL = process.env.STOCK_API_URL || 'http://localhost:5001';
 
-// Create axios instance with timeout
-const apiClient = axios.create({
-  timeout: 5000 // 5 second timeout
-});
-
 // Get all dividends
 router.get('/', authMiddleware, async (req, res) => {
   try {

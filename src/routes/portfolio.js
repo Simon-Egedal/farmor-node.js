@@ -4,83 +4,76 @@ const Portfolio = require('../models/Portfolio');
 const Transaction = require('../models/Transaction');
 const Cash = require('../models/Cash');
 const { authMiddleware } = require('../middleware/auth');
-const { convertToDKK } = require('../utils/currencyConverter');
 
 const router = express.Router();
 const STOCK_API_URL = process.env.STOCK_API_URL || 'http://localhost:5001';
 
-// Create axios instance with timeout
-const apiClient = axios.create({
-  timeout: 5000 // 5 second timeout
-});
-
 // Helper function to fetch current price for a ticker
 const getCurrentPrice = async (ticker) => {
   try {
-    const response = await apiClient.get(`${STOCK_API_URL}/api/stock/${ticker}`);
+    const response = await axios.get(`${STOCK_API_URL}/api/stock/${ticker}`);
     return response.data.price || 0;
   } catch (error) {
-    console.warn(`[WARN] Error fetching price for ${ticker}:`, error.message);
+    console.error(`Error fetching price for ${ticker}:`, error.message);
     return 0;
   }
 };
 
-// Helper function to enrich portfolio with real-time prices and convert to DKK
+// Helper function to get USD/DKK exchange rate
+const getExchangeRate = async () => {
+  try {
+    const response = await axios.get(`${STOCK_API_URL}/api/exchange-rate/USD/DKK`);
+    return response.data.rate || 6.5; // Default rate if API fails
+  } catch (error) {
+    console.error('Error fetching exchange rate:', error.message);
+    return 6.5; // Default USD/DKK rate
+  }
+};
+
+// Helper function to enrich portfolio with real-time prices in DKK
 const enrichPortfolioWithPrices = async (stocks) => {
   const tickers = stocks.map(s => s.ticker);
   
   try {
-    const response = await apiClient.post(`${STOCK_API_URL}/api/batch-price`, {
+    // Fetch exchange rate
+    const exchangeRate = await getExchangeRate();
+    
+    // Fetch prices
+    const response = await axios.post(`${STOCK_API_URL}/api/batch-price`, {
       tickers
     });
     
     const priceData = response.data;
     
-    return await Promise.all(stocks.map(async (stock) => {
-      const currentPrice = priceData[stock.ticker]?.price || 0;
-      
-      // Convert prices to DKK
-      const buyPriceDKK = await convertToDKK(stock.buyPrice, stock.currency);
-      const currentPriceDKK = await convertToDKK(currentPrice, stock.currency);
-      
+    return stocks.map(stock => {
+      const currentPriceUSD = priceData[stock.ticker]?.price || 0;
+      const currentPrice = currentPriceUSD * exchangeRate; // Convert to DKK
+      const buyPriceDKK = stock.buyPrice * exchangeRate; // Buy price in DKK
       const cost = buyPriceDKK * stock.shares;
-      const currentValue = currentPriceDKK * stock.shares;
+      const currentValue = currentPrice * stock.shares;
       const gain = currentValue - cost;
       const gainPercent = cost > 0 ? ((gain / cost) * 100).toFixed(2) : 0;
       
       return {
         ...stock.toObject(),
-        // Original prices
-        originalPrice: currentPrice,
-        originalBuyPrice: stock.buyPrice,
-        originalCurrency: stock.currency,
-        // DKK prices
-        currentPriceDKK: parseFloat(currentPriceDKK.toFixed(2)),
-        buyPriceDKK: parseFloat(buyPriceDKK.toFixed(2)),
-        costDKK: parseFloat(cost.toFixed(2)),
-        currentValueDKK: parseFloat(currentValue.toFixed(2)),
-        gainDKK: parseFloat(gain.toFixed(2)),
-        gainPercent: parseFloat(gainPercent)
+        currentPrice: parseFloat(currentPrice.toFixed(2)),
+        currentValue: parseFloat(currentValue.toFixed(2)),
+        gain: parseFloat(gain.toFixed(2)),
+        gainPercent: parseFloat(gainPercent),
+        currency: 'DKK',
+        exchangeRate: parseFloat(exchangeRate.toFixed(2))
       };
-    }));
+    });
   } catch (error) {
-    console.warn('[WARN] Error fetching prices:', error.message);
+    console.error('Error fetching prices:', error.message);
     // Return stocks with buy price as current price if API fails
-    return await Promise.all(stocks.map(async (stock) => {
-      const buyPriceDKK = await convertToDKK(stock.buyPrice, stock.currency);
-      
-      return {
-        ...stock.toObject(),
-        originalPrice: stock.buyPrice,
-        originalBuyPrice: stock.buyPrice,
-        originalCurrency: stock.currency,
-        currentPriceDKK: buyPriceDKK,
-        buyPriceDKK,
-        costDKK: parseFloat((buyPriceDKK * stock.shares).toFixed(2)),
-        currentValueDKK: parseFloat((buyPriceDKK * stock.shares).toFixed(2)),
-        gainDKK: 0,
-        gainPercent: 0
-      };
+    return stocks.map(stock => ({
+      ...stock.toObject(),
+      currentPrice: stock.buyPrice * 6.5,
+      currentValue: stock.buyPrice * 6.5 * stock.shares,
+      gain: 0,
+      gainPercent: 0,
+      currency: 'DKK'
     }));
   }
 };
@@ -170,15 +163,25 @@ router.post('/add', authMiddleware, async (req, res) => {
 
     await transaction.save();
 
-    // If user chose to deduct from cash, create a cash withdrawal
+    // If user chose to deduct from cash, create a cash withdrawal in DKK
     if (deductFromCash) {
-      const cost = parseFloat(shares) * parseFloat(buyPrice);
-      const cashTransaction = new Cash({
-        amount: cost,
-        type: 'WITHDRAWAL',
-        description: `Stock purchase: ${ticker.toUpperCase()} - ${parseFloat(shares)} shares @ $${parseFloat(buyPrice)}`
-      });
-      await cashTransaction.save();
+      try {
+        // Get exchange rate
+        const exchangeRate = await getExchangeRate();
+        
+        // Convert cost to DKK
+        const costUSD = parseFloat(shares) * parseFloat(buyPrice);
+        const costDKK = costUSD * exchangeRate;
+        
+        const cashTransaction = new Cash({
+          amount: costDKK,
+          type: 'WITHDRAWAL',
+          description: `Stock purchase: ${ticker.toUpperCase()} - ${parseFloat(shares)} shares @ ${parseFloat(buyPrice)} USD (${costDKK.toFixed(2)} DKK)`
+        });
+        await cashTransaction.save();
+      } catch (error) {
+        console.error('Error deducting from cash:', error.message);
+      }
     }
 
     // Return with enriched price data
@@ -232,19 +235,22 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 
     // If selling all or partial
     const sharesToSell = sellShares ? parseFloat(sellShares) : portfolio.shares;
-    const currentPrice = sellPrice ? parseFloat(sellPrice) : portfolio.buyPrice;
+    const sellPriceUSD = sellPrice ? parseFloat(sellPrice) : portfolio.buyPrice;
     
     if (sharesToSell > portfolio.shares) {
       return res.status(400).json({ error: 'Cannot sell more shares than you own' });
     }
 
-    const saleProceeds = sharesToSell * currentPrice;
+    // Get exchange rate and convert to DKK
+    const exchangeRate = await getExchangeRate();
+    const sellPriceDKK = sellPriceUSD * exchangeRate;
+    const saleProceeds = sharesToSell * sellPriceDKK;
 
-    // Create cash transaction for sale proceeds
+    // Create cash transaction for sale proceeds in DKK
     const cashTransaction = new Cash({
       amount: parseFloat(saleProceeds.toFixed(2)),
       type: 'SALE',
-      description: `Sale of ${sharesToSell} shares of ${portfolio.ticker} @ ${currentPrice.toFixed(2)}`,
+      description: `Sale of ${sharesToSell} shares of ${portfolio.ticker} @ ${sellPriceUSD.toFixed(2)} USD = ${sellPriceDKK.toFixed(2)} DKK/share`,
       date: new Date()
     });
     await cashTransaction.save();
@@ -254,7 +260,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
       ticker: portfolio.ticker,
       type: 'SELL',
       shares: sharesToSell,
-      price: currentPrice,
+      price: sellPriceUSD,
       currency: portfolio.currency,
       transactionDate: new Date()
     });
@@ -266,7 +272,8 @@ router.delete('/:id', authMiddleware, async (req, res) => {
       res.json({ 
         message: 'Stock sold completely',
         proceeds: parseFloat(saleProceeds.toFixed(2)),
-        shares: sharesToSell
+        shares: sharesToSell,
+        currency: 'DKK'
       });
     } else {
       // Otherwise, update shares
