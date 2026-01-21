@@ -292,22 +292,22 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 
     // If selling all or partial
     const sharesToSell = sellShares ? parseFloat(sellShares) : portfolio.shares;
-    const sellPriceUSD = sellPrice ? parseFloat(sellPrice) : portfolio.buyPrice;
+    const sellPriceNative = sellPrice ? parseFloat(sellPrice) : portfolio.buyPrice;
     
     if (sharesToSell > portfolio.shares) {
       return res.status(400).json({ error: 'Cannot sell more shares than you own' });
     }
 
-    // Get exchange rate and convert to DKK
-    const exchangeRate = await getExchangeRate();
-    const sellPriceDKK = sellPriceUSD * exchangeRate;
+    // Determine stock currency and convert to DKK
+    const stockCurrency = getCurrencyFromTicker(portfolio.ticker);
+    const sellPriceDKK = convertToDKK(sellPriceNative, stockCurrency);
     const saleProceeds = sharesToSell * sellPriceDKK;
 
     // Create cash transaction for sale proceeds in DKK
     const cashTransaction = new Cash({
       amount: parseFloat(saleProceeds.toFixed(2)),
       type: 'SALE',
-      description: `Sale of ${sharesToSell} shares of ${portfolio.ticker} @ ${sellPriceUSD.toFixed(2)} USD = ${sellPriceDKK.toFixed(2)} DKK/share`,
+      description: `Sale of ${sharesToSell} shares of ${portfolio.ticker} @ ${sellPriceNative.toFixed(2)} ${stockCurrency} = ${sellPriceDKK.toFixed(2)} DKK/share`,
       date: new Date()
     });
     await cashTransaction.save();
@@ -317,8 +317,8 @@ router.delete('/:id', authMiddleware, async (req, res) => {
       ticker: portfolio.ticker,
       type: 'SELL',
       shares: sharesToSell,
-      price: sellPriceUSD,
-      currency: portfolio.currency,
+      price: sellPriceNative,
+      currency: stockCurrency,
       transactionDate: new Date()
     });
     await transaction.save();
