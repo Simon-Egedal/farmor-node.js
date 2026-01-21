@@ -160,7 +160,7 @@ router.get('/summary', authMiddleware, async (req, res) => {
     const enriched = await enrichPortfolioWithPrices(portfolio);
     
     const totalCost = enriched.reduce((sum, stock) => {
-      return sum + (stock.buyPrice * stock.shares);
+      return sum + stock.cost;  // Use cost in DKK, not native price
     }, 0);
     
     const totalValue = enriched.reduce((sum, stock) => {
