@@ -85,20 +85,24 @@ const enrichPortfolioWithPrices = async (stocks) => {
       
       return {
         ...stock.toObject(),
+        // For frontend compatibility
+        currentPrice: currentPriceDKK,
+        buyPrice: buyPriceDKK,
+        currentValue: valueDKK,
+        cost: costDKK,
+        gain: gainDKK,
+        gainPercent: gainPercent,
+        
         // Native prices (in stock's original currency)
         priceNative: parseFloat(priceInStockCurrency.toFixed(2)),
         buyPriceNative: parseFloat(stock.buyPrice.toFixed(2)),
         nativeCurrency: stockCurrency,
         
-        // DKK prices
+        // DKK prices (explicit)
         priceDKK: currentPriceDKK,
         buyPriceDKK: buyPriceDKK,
-        
-        // DKK totals
-        costDKK: parseFloat(costDKK.toFixed(2)),
         valueDKK: parseFloat(valueDKK.toFixed(2)),
-        gainDKK: parseFloat(gainDKK.toFixed(2)),
-        gainPercent: parseFloat(gainPercent)
+        costDKK: parseFloat(costDKK.toFixed(2))
       };
     });
   } catch (error) {
