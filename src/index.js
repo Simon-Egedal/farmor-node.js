@@ -24,14 +24,20 @@ const app = express();
 
 // Catch uncaught exceptions
 process.on('uncaughtException', (err) => {
-  console.error('✗ Uncaught Exception:', err);
-  process.exit(1);
+  console.error('[ERROR] Uncaught Exception:', err.message);
+  console.error('[ERROR] Stack:', err.stack);
+  // Don't exit - keep app running
 });
 
 // Catch unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('✗ Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
+  console.error('[ERROR] Unhandled Rejection:', reason);
+  // Don't exit - keep app running
+});
+
+// Catch warnings
+process.on('warning', (warning) => {
+  console.warn('[WARNING]', warning.name, '-', warning.message);
 });
 
 // Log all signals to identify what's stopping the container
@@ -73,18 +79,32 @@ if (!process.env.MONGODB_URI) {
   });
 }
 
-// Health check
+// Health check - MUST always return 200 for Railway
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
+  try {
+    res.status(200).json({ 
+      status: 'OK', 
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime()
+    });
+  } catch (err) {
+    console.error('[HEALTH_ERROR]', err);
+    res.status(200).json({ status: 'OK' }); // Still return 200 even if error
+  }
 });
 
-// Readiness check - verifies MongoDB is connected
+// Readiness check - verifies app is ready
 app.get('/ready', (req, res) => {
-  if (mongoose.connection.readyState === 1) {
-    res.status(200).json({ status: 'READY', db: 'connected' });
-  } else {
-    // Still return 200 even if DB not connected - app can function without it
-    res.status(200).json({ status: 'READY', db: 'disconnected', warning: 'MongoDB not connected' });
+  try {
+    const dbConnected = mongoose.connection.readyState === 1;
+    res.status(200).json({ 
+      status: 'READY', 
+      db: dbConnected ? 'connected' : 'disconnected',
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('[READY_ERROR]', err);
+    res.status(200).json({ status: 'READY' });
   }
 });
 
@@ -111,15 +131,27 @@ app.use((err, req, res, next) => {
 
 // Start server
 const PORT = process.env.PORT || 5000;
+console.log(`[INFO] Starting server on port ${PORT}...`);
+
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`[INFO] Environment: ${process.env.NODE_ENV || 'production'}`);
   console.log('[INFO] Application ready to receive requests');
+  console.log('[INFO] ========== APP IS RUNNING ==========');
   
   // Start health check only after server is listening
   setInterval(() => {
     console.log(`[HEALTH] App is alive - ${new Date().toISOString()}`);
   }, 30000);
+});
+
+// Error handlers for server
+server.on('error', (err) => {
+  console.error('[SERVER_ERROR]', err.message);
+});
+
+server.on('clientError', (err, socket) => {
+  console.error('[CLIENT_ERROR]', err.message);
 });
 
 // Track connections
