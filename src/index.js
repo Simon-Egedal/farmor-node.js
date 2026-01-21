@@ -133,29 +133,29 @@ server.on('connection', (conn) => {
   });
 });
 
-// Graceful shutdown with delay to prevent accidental restarts
+// Graceful shutdown
 const shutdown = (signal) => {
-  console.log(`\n[INFO] ${signal} received, shutting down gracefully...`);
+  console.log(`\n[SHUTDOWN] ${signal} - initiating graceful shutdown...`);
   
   // Set a flag to prevent re-entrance
   if (process.shuttingDown) {
-    console.log('[INFO] Already shutting down, ignoring signal');
+    console.log('[SHUTDOWN] Already shutting down, ignoring signal');
     return;
   }
   process.shuttingDown = true;
   
   // Close server and connections
   server.close(() => {
-    console.log('[INFO] Server closed');
+    console.log('[SHUTDOWN] Server closed');
   });
 
   // Close MongoDB connection separately if connected
   if (mongoose.connection.readyState === 1) {
     mongoose.disconnect().then(() => {
-      console.log('[INFO] MongoDB connection closed');
+      console.log('[SHUTDOWN] MongoDB connection closed');
       process.exit(0);
     }).catch((err) => {
-      console.error('[ERROR] Error closing MongoDB:', err.message);
+      console.error('[SHUTDOWN] Error closing MongoDB:', err.message);
       process.exit(1);
     });
   } else {
@@ -164,25 +164,34 @@ const shutdown = (signal) => {
   
   // Force shutdown after 30 seconds
   setTimeout(() => {
-    console.error('[ERROR] Forced shutdown after timeout');
+    console.error('[SHUTDOWN] Forced exit after 30s timeout');
     process.exit(1);
   }, 30000);
 };
 
-// Only shutdown on explicit signals
+// Handle all signals explicitly
 process.on('SIGTERM', () => {
-  console.log('[INFO] SIGTERM received - ignoring (app will keep running)');
-  // Don't call shutdown - Railway sends SIGTERM as part of deployment
-  // The app should only exit on SIGKILL (which can't be ignored) or manual intervention
+  console.log('[SIGNAL] SIGTERM received');
+  console.log('[INFO] Ignoring SIGTERM - app will keep running on Railway');
+  // Don't shutdown on SIGTERM
 });
 
 process.on('SIGINT', () => {
-  console.log('[INFO] SIGINT received (Ctrl+C) - shutting down');
+  console.log('[SIGNAL] SIGINT (Ctrl+C) - graceful shutdown');
   shutdown('SIGINT');
 });
 
-// Log when these signals arrive but don't exit
-process.on('SIGHUP', () => console.log('[SIGNAL] SIGHUP received - ignoring'));
-process.on('SIGPIPE', () => console.log('[SIGNAL] SIGPIPE received - ignoring'));
+// Log other signals but don't exit
+process.on('SIGHUP', () => console.log('[SIGNAL] SIGHUP received'));
+process.on('SIGQUIT', () => console.log('[SIGNAL] SIGQUIT received'));
+process.on('SIGABRT', () => console.log('[SIGNAL] SIGABRT received'));
+process.on('SIGUSR1', () => console.log('[SIGNAL] SIGUSR1 received'));
+process.on('SIGUSR2', () => console.log('[SIGNAL] SIGUSR2 received'));
+process.on('SIGPIPE', () => console.log('[SIGNAL] SIGPIPE received'));
+
+// Log process exit
+process.on('exit', (code) => {
+  console.log(`[PROCESS] Node.js exiting with code: ${code}`);
+});
 
 module.exports = app;
