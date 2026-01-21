@@ -8,13 +8,18 @@ const { authMiddleware } = require('../middleware/auth');
 const router = express.Router();
 const STOCK_API_URL = process.env.STOCK_API_URL || 'http://localhost:5001';
 
+// Create axios instance with timeout
+const apiClient = axios.create({
+  timeout: 5000 // 5 second timeout
+});
+
 // Helper function to fetch current price for a ticker
 const getCurrentPrice = async (ticker) => {
   try {
-    const response = await axios.get(`${STOCK_API_URL}/api/stock/${ticker}`);
+    const response = await apiClient.get(`${STOCK_API_URL}/api/stock/${ticker}`);
     return response.data.price || 0;
   } catch (error) {
-    console.error(`Error fetching price for ${ticker}:`, error.message);
+    console.warn(`[WARN] Error fetching price for ${ticker}:`, error.message);
     return 0;
   }
 };
@@ -24,7 +29,7 @@ const enrichPortfolioWithPrices = async (stocks) => {
   const tickers = stocks.map(s => s.ticker);
   
   try {
-    const response = await axios.post(`${STOCK_API_URL}/api/batch-price`, {
+    const response = await apiClient.post(`${STOCK_API_URL}/api/batch-price`, {
       tickers
     });
     
@@ -46,7 +51,7 @@ const enrichPortfolioWithPrices = async (stocks) => {
       };
     });
   } catch (error) {
-    console.error('Error fetching prices:', error.message);
+    console.warn('[WARN] Error fetching prices:', error.message);
     // Return stocks with buy price as current price if API fails
     return stocks.map(stock => ({
       ...stock.toObject(),

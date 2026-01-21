@@ -43,17 +43,20 @@ app.use(express.urlencoded({ extended: true }));
 
 // MongoDB Connection
 console.log('[INFO] Attempting MongoDB connection...');
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => {
-  console.log('✓ MongoDB connected');
-})
-.catch(err => {
-  console.error('✗ MongoDB connection error:', err.message);
-  // Don't exit - app can still serve requests
-});
+if (!process.env.MONGODB_URI) {
+  console.warn('[WARN] MONGODB_URI not set, continuing without database...');
+} else {
+  mongoose.connect(process.env.MONGODB_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => {
+    console.log('✓ MongoDB connected');
+  })
+  .catch(err => {
+    console.error('✗ MongoDB connection error:', err.message);
+  });
+}
 
 // Health check
 app.get('/health', (req, res) => {
@@ -110,18 +113,22 @@ const shutdown = (signal) => {
   console.log(`\n[INFO] ${signal} received, shutting down gracefully...`);
   
   // Close server and connections
-  server.close(async () => {
+  server.close(() => {
     console.log('[INFO] Server closed');
   });
 
-  // Close MongoDB connection separately
-  mongoose.disconnect().then(() => {
-    console.log('[INFO] MongoDB connection closed');
+  // Close MongoDB connection separately if connected
+  if (mongoose.connection.readyState === 1) {
+    mongoose.disconnect().then(() => {
+      console.log('[INFO] MongoDB connection closed');
+      process.exit(0);
+    }).catch((err) => {
+      console.error('[ERROR] Error closing MongoDB:', err.message);
+      process.exit(1);
+    });
+  } else {
     process.exit(0);
-  }).catch((err) => {
-    console.error('[ERROR] Error closing MongoDB:', err.message);
-    process.exit(1);
-  });
+  }
   
   // Force shutdown after 30 seconds
   setTimeout(() => {

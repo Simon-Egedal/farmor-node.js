@@ -4,6 +4,11 @@ const User = require('../models/User');
 
 const router = express.Router();
 
+// Validate JWT_SECRET on startup
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'dev-secret-key-change-in-production') {
+  console.warn('[WARN] JWT_SECRET not properly configured - using default insecure key');
+}
+
 // Generate JWT Token
 const generateToken = (userId) => {
   return jwt.sign({ userId }, process.env.JWT_SECRET, {
