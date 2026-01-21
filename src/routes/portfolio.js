@@ -4,7 +4,6 @@ const Portfolio = require('../models/Portfolio');
 const Transaction = require('../models/Transaction');
 const Cash = require('../models/Cash');
 const { authMiddleware } = require('../middleware/auth');
-const { convertToDKK } = require('../utils/currencyConverter');
 
 const router = express.Router();
 const STOCK_API_URL = process.env.STOCK_API_URL || 'http://localhost:5001';
@@ -13,6 +12,34 @@ const STOCK_API_URL = process.env.STOCK_API_URL || 'http://localhost:5001';
 const apiClient = axios.create({
   timeout: 5000 // 5 second timeout to prevent hanging
 });
+
+// Exchange rates to DKK (cache these)
+const EXCHANGE_RATES = {
+  DKK: 1,
+  USD: 6.38,
+  EUR: 7.46,
+  GBP: 8.47,
+  SEK: 0.63,
+  NOK: 0.60,
+  CHF: 7.31
+};
+
+// Helper function to determine stock currency from ticker
+const getCurrencyFromTicker = (ticker) => {
+  if (ticker.includes('.CO')) return 'DKK';   // Copenhagen
+  if (ticker.includes('.ST')) return 'SEK';   // Stockholm
+  if (ticker.includes('.OL')) return 'NOK';   // Oslo
+  if (ticker.includes('.HE')) return 'EUR';   // Helsinki
+  if (ticker.includes('.SW')) return 'CHF';   // Swiss
+  return 'USD'; // Default to USD (T, KO, MSFT, etc.)
+};
+
+// Helper function to convert any currency to DKK
+const convertToDKK = (amount, currency) => {
+  if (!amount || amount < 0) return 0;
+  const rate = EXCHANGE_RATES[currency] || EXCHANGE_RATES['USD'];
+  return parseFloat((amount * rate).toFixed(2));
+};
 
 // Helper function to fetch current price for a ticker
 const getCurrentPrice = async (ticker) => {
@@ -25,27 +52,6 @@ const getCurrentPrice = async (ticker) => {
   }
 };
 
-// Helper function to get exchange rate with timeout
-const getExchangeRate = async () => {
-  try {
-    const response = await apiClient.get(`${STOCK_API_URL}/api/exchange-rate/USD/DKK`);
-    return response.data.rate || 6.5; // Default rate if API fails
-  } catch (error) {
-    console.warn('[WARN] Error fetching exchange rate:', error.message);
-    return 6.5; // Default USD/DKK rate
-  }
-};
-
-// Helper function to determine stock currency from ticker
-const getCurrencyFromTicker = (ticker) => {
-  if (ticker.includes('.CO')) return 'DKK';   // Copenhagen
-  if (ticker.includes('.ST')) return 'SEK';   // Stockholm
-  if (ticker.includes('.OL')) return 'NOK';   // Oslo
-  if (ticker.includes('.HE')) return 'EUR';   // Helsinki
-  if (ticker.includes('.SW')) return 'CHF';   // Swiss
-  return 'USD'; // Default to USD
-};
-
 // Helper function to enrich portfolio with real-time prices in DKK
 const enrichPortfolioWithPrices = async (stocks) => {
   const tickers = stocks.map(s => s.ticker);
@@ -55,42 +61,63 @@ const enrichPortfolioWithPrices = async (stocks) => {
     const priceResponse = await apiClient.post(`${STOCK_API_URL}/api/batch-price`, { tickers });
     const priceData = priceResponse.data;
     
-    return await Promise.all(stocks.map(async (stock) => {
+    return stocks.map(stock => {
       const priceInStockCurrency = priceData[stock.ticker]?.price || 0;
       
       // Determine the currency of the stock based on ticker
       const stockCurrency = getCurrencyFromTicker(stock.ticker);
       
-      // Convert to DKK if not already DKK
-      const currentPriceDKK = await convertToDKK(priceInStockCurrency, stockCurrency);
-      const buyPriceDKK = await convertToDKK(stock.buyPrice, stock.currency || stockCurrency);
+      // Convert to DKK
+      const currentPriceDKK = convertToDKK(priceInStockCurrency, stockCurrency);
+      const buyPriceDKK = convertToDKK(stock.buyPrice, stockCurrency);
       
-      const cost = buyPriceDKK * stock.shares;
-      const currentValue = currentPriceDKK * stock.shares;
-      const gain = currentValue - cost;
-      const gainPercent = cost > 0 ? ((gain / cost) * 100).toFixed(2) : 0;
+      // Calculate totals in DKK
+      const costDKK = buyPriceDKK * stock.shares;
+      const valueDKK = currentPriceDKK * stock.shares;
+      const gainDKK = valueDKK - costDKK;
+      const gainPercent = costDKK > 0 ? ((gainDKK / costDKK) * 100).toFixed(2) : 0;
+      
+      console.log(`[DEBUG] ${stock.ticker}: Native=${priceInStockCurrency}${stockCurrency} → DKK=${currentPriceDKK} | Value=${valueDKK}DKK`);
       
       return {
         ...stock.toObject(),
-        currentPrice: parseFloat(currentPriceDKK.toFixed(2)),
-        currentValue: parseFloat(currentValue.toFixed(2)),
-        gain: parseFloat(gain.toFixed(2)),
-        gainPercent: parseFloat(gainPercent),
-        currency: 'DKK',
-        stockNativeCurrency: stockCurrency
+        // Native prices (in stock's original currency)
+        priceNative: parseFloat(priceInStockCurrency.toFixed(2)),
+        buyPriceNative: parseFloat(stock.buyPrice.toFixed(2)),
+        nativeCurrency: stockCurrency,
+        
+        // DKK prices
+        priceDKK: currentPriceDKK,
+        buyPriceDKK: buyPriceDKK,
+        
+        // DKK totals
+        costDKK: parseFloat(costDKK.toFixed(2)),
+        valueDKK: parseFloat(valueDKK.toFixed(2)),
+        gainDKK: parseFloat(gainDKK.toFixed(2)),
+        gainPercent: parseFloat(gainPercent)
       };
-    }));
+    });
   } catch (error) {
     console.warn('[WARN] Error fetching prices:', error.message);
-    // Return stocks with buy price as current price if API fails
-    return stocks.map(stock => ({
-      ...stock.toObject(),
-      currentPrice: stock.buyPrice,
-      currentValue: stock.buyPrice * stock.shares,
-      gain: 0,
-      gainPercent: 0,
-      currency: 'DKK'
-    }));
+    // Return stocks with current values if API fails
+    return stocks.map(stock => {
+      const stockCurrency = getCurrencyFromTicker(stock.ticker);
+      const buyPriceDKK = convertToDKK(stock.buyPrice, stockCurrency);
+      const valueDKK = buyPriceDKK * stock.shares;
+      
+      return {
+        ...stock.toObject(),
+        priceNative: parseFloat(stock.buyPrice.toFixed(2)),
+        buyPriceNative: parseFloat(stock.buyPrice.toFixed(2)),
+        nativeCurrency: stockCurrency,
+        priceDKK: buyPriceDKK,
+        buyPriceDKK: buyPriceDKK,
+        costDKK: parseFloat(valueDKK.toFixed(2)),
+        valueDKK: parseFloat(valueDKK.toFixed(2)),
+        gainDKK: 0,
+        gainPercent: 0
+      };
+    });
   }
 };
 
