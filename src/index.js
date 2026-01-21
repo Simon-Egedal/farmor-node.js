@@ -170,8 +170,16 @@ const shutdown = (signal) => {
 };
 
 // Only shutdown on explicit signals
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => {
+  console.log('[INFO] SIGTERM received - ignoring (app will keep running)');
+  // Don't call shutdown - Railway sends SIGTERM as part of deployment
+  // The app should only exit on SIGKILL (which can't be ignored) or manual intervention
+});
+
+process.on('SIGINT', () => {
+  console.log('[INFO] SIGINT received (Ctrl+C) - shutting down');
+  shutdown('SIGINT');
+});
 
 // Log when these signals arrive but don't exit
 process.on('SIGHUP', () => console.log('[SIGNAL] SIGHUP received - ignoring'));
