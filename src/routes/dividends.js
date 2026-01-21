@@ -96,6 +96,29 @@ router.get('/summary', authMiddleware, async (req, res) => {
           console.log(`[DIVIDENDS] ${stock.ticker}: ${totalDividend} ${currency} = ${dividendInDKK} DKK`);
           estimatedAnnualDividend += dividendInDKK;
           
+          // Get actual dividend dates from API response
+          let exDate = new Date(now);
+          exDate.setMonth(exDate.getMonth() + 3);
+          let payDate = new Date(exDate);
+          payDate.setMonth(payDate.getMonth() + 1);
+          
+          // Try to get actual dates from API response
+          try {
+            const divResponse = await axios.get(`${STOCK_API_URL}/api/dividend/${stock.ticker}`, {
+              timeout: 5000
+            });
+            if (divResponse.data.nextExDate) {
+              exDate = new Date(divResponse.data.nextExDate);
+              console.log(`[DIVIDENDS] ${stock.ticker} next ex-date: ${exDate.toISOString()}`);
+            }
+            if (divResponse.data.nextPayDate) {
+              payDate = new Date(divResponse.data.nextPayDate);
+              console.log(`[DIVIDENDS] ${stock.ticker} next pay-date: ${payDate.toISOString()}`);
+            }
+          } catch (apiError) {
+            console.warn(`[DIVIDENDS] Could not fetch dates for ${stock.ticker}, using estimates`);
+          }
+          
           // Create or update expected dividend record
           let dividend = await Dividend.findOne({
             ticker: stock.ticker,
@@ -107,21 +130,17 @@ router.get('/summary', authMiddleware, async (req, res) => {
             dividend.totalAmount = dividendInDKK;
             dividend.shares = shares;
             dividend.currency = 'DKK';
+            dividend.exDate = exDate;
+            dividend.paymentDate = payDate;
             await dividend.save();
           } else {
-            // Estimate next payment date (typically 3-4 months out)
-            const estimatedExDate = new Date(now);
-            estimatedExDate.setMonth(estimatedExDate.getMonth() + 3);
-            const estimatedPayDate = new Date(estimatedExDate);
-            estimatedPayDate.setMonth(estimatedPayDate.getMonth() + 1);
-            
             dividend = new Dividend({
               ticker: stock.ticker,
               amountPerShare: annualDividendPerShare,
               totalAmount: dividendInDKK,
               currency: 'DKK',
-              exDate: estimatedExDate,
-              paymentDate: estimatedPayDate,
+              exDate: exDate,
+              paymentDate: payDate,
               shares: shares,
               status: 'EXPECTED',
               notes: `Estimated annual: ${annualDividendPerShare.toFixed(4)}/share × ${shares} shares = ${dividendInDKK.toFixed(2)} DKK`
