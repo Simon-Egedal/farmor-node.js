@@ -96,14 +96,38 @@ router.get('/summary', authMiddleware, async (req, res) => {
           console.log(`[DIVIDENDS] ${stock.ticker}: ${totalDividend} ${currency} = ${dividendInDKK} DKK`);
           estimatedAnnualDividend += dividendInDKK;
           
-          // Use simple estimated dates - don't try to predict exact dates
-          // Most stocks pay dividends quarterly (every ~90 days)
-          const exDate = new Date(now);
-          exDate.setMonth(exDate.getMonth() + 2);  // ~2 months from now
-          exDate.setDate(15);  // Middle of month
+          // Default dates
+          let exDate = new Date(now);
+          exDate.setMonth(exDate.getMonth() + 3);
+          let payDate = new Date(exDate);
+          payDate.setMonth(payDate.getMonth() + 1);
           
-          const payDate = new Date(exDate);
-          payDate.setMonth(payDate.getMonth() + 1);  // Payment ~1 month after ex-date
+          // Try to get real dates from API
+          try {
+            const divResponse = await axios.get(`${STOCK_API_URL}/api/dividend/${stock.ticker}`, {
+              timeout: 5000
+            });
+            
+            if (divResponse.data.nextExDate) {
+              try {
+                exDate = new Date(divResponse.data.nextExDate);
+                console.log(`[DIVIDENDS] ${stock.ticker} ex-date: ${exDate.toISOString()}`);
+              } catch (e) {
+                console.warn(`Could not parse exDate for ${stock.ticker}`);
+              }
+            }
+            
+            if (divResponse.data.nextPayDate) {
+              try {
+                payDate = new Date(divResponse.data.nextPayDate);
+                console.log(`[DIVIDENDS] ${stock.ticker} pay-date: ${payDate.toISOString()}`);
+              } catch (e) {
+                console.warn(`Could not parse payDate for ${stock.ticker}`);
+              }
+            }
+          } catch (apiError) {
+            console.warn(`Could not fetch dividend dates for ${stock.ticker}`);
+          }
           
           // Create or update expected dividend record
           let dividend = await Dividend.findOne({
